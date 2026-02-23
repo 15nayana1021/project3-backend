@@ -122,8 +122,8 @@ async def lifespan(app: FastAPI):
     seed_database() 
     
     # 이제 main_simulation 모듈을 정상적으로 인식합니다.
-    # main_simulation.running = True
-    # asyncio.create_task(run_simulation_loop())
+    main_simulation.running = True
+    asyncio.create_task(run_simulation_loop())
     print("🚀 [시스템] 시뮬레이션과 서버가 정상 가동됩니다!")
     
     yield 
