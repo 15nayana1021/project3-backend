@@ -190,7 +190,7 @@ async def get_market_data(ticker: str = "삼송전자"):
     book = engine.order_books.get(ticker, {"BUY": [], "SELL": []})
     
     # 엔진 호가
-    buy_orders = [o.dict() for o in book["BUY"][:5]]
+    buy_orders = [o.dict() for o in book["BUY"][:5]] #테스트
     sell_orders = [o.dict() for o in book["SELL"][:5]]
 
     if ticker in hot_scores:

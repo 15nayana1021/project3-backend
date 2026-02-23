@@ -19,7 +19,7 @@ os.chdir(backend_root)
 # 2. 필요한 모듈 임포트
 try:
     from core.agent_service import StockAgentService
-    from database import DB_NAME 
+    from database import DB_PATH 
 except ImportError:
     DB_PATH = "/home/site/wwwroot/stock_game.db" if os.getenv("WEBSITE_HOSTNAME") else "stock_game.db"
     from core.agent_service import StockAgentService
@@ -45,7 +45,7 @@ def save_direct_to_db(company_name, category, news_list):
     stock_game.db에 뉴스를 저장합니다.
     (테이블 강제 생성 + 점수 음수 보정 + 언론사 저장 기능 포함)
     """
-    db_path = os.path.join(backend_root, DB_NAME)
+    db_path = os.path.join(backend_root, DB_PATH)
     
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -120,12 +120,12 @@ def save_direct_to_db(company_name, category, news_list):
         conn.close()
 
 def run_bulk_generation():
-    print(f"📂 사용 중인 DB: {DB_NAME}") 
+    print(f"📂 사용 중인 DB: {DB_PATH}") 
     agent = StockAgentService(mode="virtual")
     
     # 🧹 [안전장치 1] 시작하자마자 기존 뉴스를 싹 지워버립니다.
     # try:
-    #     db_path = os.path.join(backend_root, DB_NAME)
+    #     db_path = os.path.join(backend_root, DB_PATH)
     #     conn = sqlite3.connect(db_path)
     #     cursor = conn.cursor()
     #     cursor.execute("DELETE FROM news") 

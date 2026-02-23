@@ -15,7 +15,7 @@ os.chdir(backend_root)
 
 try:
     from core.agent_service import StockAgentService
-    from database import DB_NAME 
+    from database import DB_PATH
 except ImportError:
     DB_PATH = "/home/site/wwwroot/stock_game.db" if os.getenv("WEBSITE_HOSTNAME") else "stock_game.db"
     from core.agent_service import StockAgentService
@@ -53,7 +53,7 @@ def fetch_real_news_headlines(query, count=10):
 
 def run_real_news_batch():
     agent = StockAgentService()
-    db_path = os.path.join(backend_root, DB_NAME)
+    db_path = os.path.join(backend_root, DB_PATH)
     print(f"\n🌍 [Real-World Connect] 실제 언론사 정보를 포함하여 수집을 시작합니다.")
 
     for target in REAL_NEWS_TARGETS:
