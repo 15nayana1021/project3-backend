@@ -127,6 +127,14 @@ def seed_database():
 async def lifespan(app: FastAPI):
     # DB 초기화 및 데이터 적재
     init_db()
+    with db_engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS ticker VARCHAR(20)"))
+            conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ticker VARCHAR(20)"))
+            conn.commit()
+            print("🛠️ [강제 수리] ticker 컬럼을 생성했습니다!")
+        except Exception as e:
+            print(f"🛠️ [강제 수리] 확인 필요: {e}")
     seed_database() 
     
     # 이제 main_simulation 모듈을 정상적으로 인식합니다.
