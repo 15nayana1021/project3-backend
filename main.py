@@ -71,6 +71,7 @@ def seed_database():
     with SessionLocal() as db:
         print("🌱 [시스템] DB 데이터를 보존하며 INITIAL_PRICES를 동기화합니다...")
         
+        # 1. 주식 가격 및 티커 동기화 (기존 로직)
         for name, price in INITIAL_PRICES.items():
             correct_ticker = TICKER_MAP.get(name, name)
             company = db.query(DBCompany).filter(DBCompany.name == name).first()
@@ -87,6 +88,21 @@ def seed_database():
         
         db.commit()
 
+        # 🚀 2. [추가] 유저 '1' 자동 생성 로직
+        # 유저 '1'이 있는지 확인하고, 없으면 초기 자금 100만 원과 함께 생성합니다.
+        user_check = db.execute(text("SELECT id FROM users WHERE username = '1'")).fetchone()
+        if not user_check:
+            print("👤 [시스템] 유저 '1'이 없습니다. 자동으로 가입 처리를 진행합니다...")
+            db.execute(text("""
+                INSERT INTO users (username, balance, level, exp) 
+                VALUES ('1', 1000000, 1, 0)
+            """))
+            db.commit()
+            print("✅ [시스템] 유저 '1' 생성 및 초기 자금 100만 원 지급 완료!")
+        else:
+            print("✅ [시스템] 유저 '1'이 이미 활성화되어 있습니다.")
+
+        # 3. AI 에이전트 생성 (기존 로직)
         if db.query(DBAgent).count() == 0:
             print("🤖 [시스템] AI 에이전트 30명을 시장에 투입합니다...")
             agents = [
@@ -96,7 +112,7 @@ def seed_database():
             db.add_all(agents)
             db.commit()
             
-        print("✅ [시스템] 주식 가격 및 영어 코드(Ticker) 동기화 완료!")
+        print("✅ [시스템] 모든 데이터 동기화 및 초기화 완료!")
 
 # [FastAPI 앱 설정]
 @asynccontextmanager
