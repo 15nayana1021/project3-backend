@@ -22,7 +22,6 @@ else:
         SQLALCHEMY_DATABASE_URL,
         pool_pre_ping=True,      # 👈 통신 전 연결이 살아있는지 확인! (필수)
         pool_recycle=300,        # 👈 300초(5분)마다 연결을 새것으로 교체! (필수) 
-        pool_pre_ping=True,
         pool_size=50,
         max_overflow=100,
     )
