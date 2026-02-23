@@ -100,11 +100,13 @@ async def run_agent_trade(agent_id: str, ticker: str, sim_time: datetime):
             company = db.query(DBCompany).filter(DBCompany.ticker == ticker).first()
             if not agent or not company: return
 
-            # 💡 [추적 1] 봇이 어떤 종목을 골랐는지 확인
-            # logger.info(f"🔎 [추적 1] {agent_id}가 {ticker} 매매 준비 중...")
-
-            news_obj = db.query(DBNews).filter(DBNews.company_name == company.name).order_by(desc(DBNews.id)).first()
-            news_text = news_obj.title if news_obj else "특이사항 없음"
+            # 💡 [여기 수정!] DBNews.ticker와 company.ticker를 비교하도록 수정
+            news_obj = db.query(DBNews).filter(DBNews.ticker == company.ticker).order_by(desc(DBNews.id)).first()
+            
+            # news_obj가 있을 때만 title을 가져오고, 없으면 기본값 설정
+            news_text = news_obj.content if news_obj else "특이사항 없음" 
+            # (참고: DBNews 모델에 title이 없고 content만 있다면 content로 쓰세요!)
+            
             trend_info = analyze_market_trend(db, ticker)
 
             portfolio_qty = agent.portfolio.get(ticker, 0)
