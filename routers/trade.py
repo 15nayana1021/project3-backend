@@ -138,8 +138,6 @@ class OrderRequest(BaseModel):
 def place_order(req: OrderRequest, db: Session = Depends(get_db)):
     try:
         user_id = int(req.user_id)
-        
-        # 💡 [핵심 고침 1] 프론트엔드가 이름만 보내든 코드만 보내든 완벽하게 찾아냅니다!
         search_query = req.ticker or req.company_name or ""
         company = db.execute(text("SELECT ticker, name, current_price FROM companies WHERE ticker = :sq OR name = :sq"), 
                              {"sq": search_query}).fetchone()
@@ -147,16 +145,19 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
         if not company:
             return {"success": False, "message": "존재하지 않는 종목입니다.", "msg": "존재하지 않는 종목입니다."}
             
-        target_ticker = company[0]  # 무조건 표준 코드(SS011 등)로 통일!
+        target_ticker = company[0]
         company_name = company[1]
-        current_price = company[2]
+        current_price = company[2] 
+        
+        # 💡 [핵심 고침 1] 유저가 직접 입력한 가격을 그대로 사용합니다!
+        order_price = int(req.price) 
         
         side_str = req.side.upper() if req.side else "BUY" 
         if side_str not in ["BUY", "SELL"]: side_str = "BUY"
         quantity = int(req.quantity)
-        total_amount = current_price * quantity
+        total_amount = order_price * quantity # 유저의 가격 기준으로 결제 금액 계산
 
-        # 💡 잔액/보유량 검증
+        # 잔액/보유량 검증
         if side_str == "BUY":
             user_row = db.execute(text("SELECT balance FROM users WHERE id = :uid"), {"uid": user_id}).fetchone()
             if not user_row or user_row[0] < total_amount:
@@ -166,40 +167,54 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
             if not holding_row or holding_row[0] < quantity:
                  return {"success": False, "message": "보유 주식이 부족합니다.", "msg": "보유 주식이 부족합니다."}
 
-        # 💡 DB 기록 (이제 무조건 올바른 ticker가 들어갑니다)
+        # 💡 [핵심 고침 2] 즉시 체결(Auto-Execution) 조건 판단
+        # 매수할 때 현재가보다 비싸게 부르거나, 매도할 때 현재가보다 싸게 부르면 즉시 체결!
+        is_immediate = False
+        if side_str == "BUY" and order_price >= current_price: is_immediate = True
+        if side_str == "SELL" and order_price <= current_price: is_immediate = True
+        
+        initial_status = 'COMPLETED' if is_immediate else 'PENDING'
+
+        # DB 장부에 주문 기록
         order_res = db.execute(text("""
             INSERT INTO orders (user_id, ticker, side, quantity, price, status, created_at)
-            VALUES (:uid, :tk, :sd, :qty, :pr, 'PENDING', :ts)
+            VALUES (:uid, :tk, :sd, :qty, :pr, :st, :ts)
             RETURNING id
         """), {
             "uid": user_id, "tk": target_ticker, "sd": side_str, 
-            "qty": quantity, "pr": current_price, "ts": datetime.now()
+            "qty": quantity, "pr": order_price, "st": initial_status, "ts": datetime.now()
         }).fetchone()
-        
         order_id = order_res[0]
         
-        # 💡 선결제 (돈/주식 먼저 묶어두기)
+        # 💡 돈과 주식 이동 (즉시 체결 로직)
         if side_str == "BUY":
             db.execute(text("UPDATE users SET balance = balance - :amt WHERE id = :uid"), {"amt": total_amount, "uid": user_id})
-        else:
+            if is_immediate: # 즉시 체결되면 주식을 포트폴리오에 바로 꽂아줌!
+                holding = db.execute(text("SELECT id FROM holdings WHERE user_id = :uid AND company_name = :tk"), {"uid": user_id, "tk": target_ticker}).fetchone()
+                if holding:
+                    db.execute(text("UPDATE holdings SET quantity = quantity + :qty WHERE user_id = :uid AND company_name = :tk"), {"qty": quantity, "uid": user_id, "tk": target_ticker})
+                else:
+                    db.execute(text("INSERT INTO holdings (user_id, company_name, quantity, average_price) VALUES (:uid, :tk, :qty, :pr)"), {"uid": user_id, "tk": target_ticker, "qty": quantity, "pr": order_price})
+        else: # SELL
             db.execute(text("UPDATE holdings SET quantity = quantity - :qty WHERE user_id = :uid AND company_name = :tk"), {"qty": quantity, "uid": user_id, "tk": target_ticker})
-            
-        db.commit() # 💡 [핵심 고침 2] 여기서 확실하게 닫아줘야 락(먹통)이 안 걸립니다!
+            if is_immediate: # 즉시 체결되면 판 돈을 잔고에 바로 꽂아줌!
+                db.execute(text("UPDATE users SET balance = balance + :amt WHERE id = :uid"), {"amt": total_amount, "uid": user_id})
+                
+        db.commit()
 
-        # 🚀 시장 엔진 전송 (오류가 나도 메인 서버가 터지지 않게 보호)
+        # 시뮬레이션 시장에도 참고용으로 전송
         try:
             sim_side = OrderSide.BUY if side_str == "BUY" else OrderSide.SELL
-            sim_order = SimOrder(agent_id=str(user_id), ticker=target_ticker, side=sim_side, order_type=OrderType.LIMIT, quantity=quantity, price=current_price)
+            sim_order = SimOrder(agent_id=str(user_id), ticker=target_ticker, side=sim_side, order_type=OrderType.LIMIT, quantity=quantity, price=order_price)
             market_engine.place_order(db, sim_order)
-        except Exception as e:
-            print(f"⚠️ 엔진 전송 무시 (시스템은 정상 작동): {e}")
+        except Exception: pass
 
-        msg = f"{company_name} {quantity}주 주문 접수 완료!"
+        msg = f"{company_name} {quantity}주 {'즉시 체결 완료!' if is_immediate else '주문 접수(미체결) 완료!'}"
         return {"success": True, "message": msg, "msg": msg, "order_id": order_id}
 
     except Exception as e:
         db.rollback()
-        print(f"🚨 주문 처리 중 에러: {e}") 
+        print(f"🚨 주문 처리 에러: {e}") 
         return {"success": False, "message": f"서버 오류: {str(e)}", "msg": str(e)}
 
 @router.get("/orders/{user_id}")
