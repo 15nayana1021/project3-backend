@@ -138,23 +138,25 @@ class OrderRequest(BaseModel):
 def place_order(req: OrderRequest, db: Session = Depends(get_db)):
     try:
         user_id = int(req.user_id)
-        target_ticker = req.ticker or req.company_name
         
-        side_str = req.side.upper() if req.side else "BUY" 
-        if side_str not in ["BUY", "SELL"]:
-            side_str = "BUY"
-
-        quantity = int(req.quantity)
+        # 💡 [핵심 고침 1] 프론트엔드가 이름만 보내든 코드만 보내든 완벽하게 찾아냅니다!
+        search_query = req.ticker or req.company_name or ""
+        company = db.execute(text("SELECT ticker, name, current_price FROM companies WHERE ticker = :sq OR name = :sq"), 
+                             {"sq": search_query}).fetchone()
         
-        # 종목 확인
-        company = db.query(DBCompany).filter(DBCompany.ticker == target_ticker).first()
         if not company:
             return {"success": False, "message": "존재하지 않는 종목입니다.", "msg": "존재하지 않는 종목입니다."}
             
-        current_price = company.current_price
+        target_ticker = company[0]  # 무조건 표준 코드(SS011 등)로 통일!
+        company_name = company[1]
+        current_price = company[2]
+        
+        side_str = req.side.upper() if req.side else "BUY" 
+        if side_str not in ["BUY", "SELL"]: side_str = "BUY"
+        quantity = int(req.quantity)
         total_amount = current_price * quantity
 
-        # 잔액/주식 수량 검증
+        # 💡 잔액/보유량 검증
         if side_str == "BUY":
             user_row = db.execute(text("SELECT balance FROM users WHERE id = :uid"), {"uid": user_id}).fetchone()
             if not user_row or user_row[0] < total_amount:
@@ -164,7 +166,7 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
             if not holding_row or holding_row[0] < quantity:
                  return {"success": False, "message": "보유 주식이 부족합니다.", "msg": "보유 주식이 부족합니다."}
 
-        # 🚀 [부활한 핵심 코드] DB 장부에 먼저 무조건 기록합니다!
+        # 💡 DB 기록 (이제 무조건 올바른 ticker가 들어갑니다)
         order_res = db.execute(text("""
             INSERT INTO orders (user_id, ticker, side, quantity, price, status, created_at)
             VALUES (:uid, :tk, :sd, :qty, :pr, 'PENDING', :ts)
@@ -176,32 +178,23 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
         
         order_id = order_res[0]
         
-        # 선결제 (돈부터 묶어둡니다)
+        # 💡 선결제 (돈/주식 먼저 묶어두기)
         if side_str == "BUY":
             db.execute(text("UPDATE users SET balance = balance - :amt WHERE id = :uid"), {"amt": total_amount, "uid": user_id})
         else:
             db.execute(text("UPDATE holdings SET quantity = quantity - :qty WHERE user_id = :uid AND company_name = :tk"), {"qty": quantity, "uid": user_id, "tk": target_ticker})
             
-        db.commit()
+        db.commit() # 💡 [핵심 고침 2] 여기서 확실하게 닫아줘야 락(먹통)이 안 걸립니다!
 
-        # 🚀 시장 엔진으로 주문 전송
-        sim_side = OrderSide.BUY if side_str == "BUY" else OrderSide.SELL
-        sim_order = SimOrder(
-            agent_id=str(user_id),
-            ticker=target_ticker,
-            side=sim_side,
-            order_type=OrderType.LIMIT,
-            quantity=quantity,
-            price=current_price
-        )
-        
-        # 엔진에 전송 (엔진이 체결하면 알아서 DB 상태를 바꿔줍니다)
+        # 🚀 시장 엔진 전송 (오류가 나도 메인 서버가 터지지 않게 보호)
         try:
+            sim_side = OrderSide.BUY if side_str == "BUY" else OrderSide.SELL
+            sim_order = SimOrder(agent_id=str(user_id), ticker=target_ticker, side=sim_side, order_type=OrderType.LIMIT, quantity=quantity, price=current_price)
             market_engine.place_order(db, sim_order)
-        except Exception as engine_e:
-            print(f"⚠️ 엔진 전송 에러(무시 가능): {engine_e}")
+        except Exception as e:
+            print(f"⚠️ 엔진 전송 무시 (시스템은 정상 작동): {e}")
 
-        msg = f"{company.name} {quantity}주 주문 접수 완료!"
+        msg = f"{company_name} {quantity}주 주문 접수 완료!"
         return {"success": True, "message": msg, "msg": msg, "order_id": order_id}
 
     except Exception as e:
