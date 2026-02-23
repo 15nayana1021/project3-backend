@@ -1,0 +1,28 @@
+# 1. 보안 파일 (절대 올리면 안 됨!)
+.env
+secret.key
+
+# 2. 파이썬 필수 제외 (캐시, 컴파일 파일)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 3. 데이터베이스 (내 로컬 데이터 보호)
+*.db
+*.sqlite3
+stock_game.db
+
+# 4. 가상환경 (라이브러리 뭉치라 올리면 안 됨)
+venv/
+env/
+.venv/
+
+# 5. OS 및 에디터 설정 파일 (지저분해짐 방지)
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 6. 대용량 미디어 파일
+*.pdf
+*.mp4

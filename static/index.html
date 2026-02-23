@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>주린이 시뮬레이터 - IT008</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      body {
+        background-color: #121212;
+        color: #e0e0e0;
+        font-family: "Pretendard", sans-serif;
+      }
+      .card {
+        background-color: #1e1e1e;
+        border: 1px solid #333;
+        margin-bottom: 20px;
+      }
+      .text-red {
+        color: #ff4d4d;
+      }
+      .text-blue {
+        color: #4d79ff;
+      }
+
+      /* 뉴스 전광판 스타일 */
+      .news-ticker-box {
+        background-color: #2c0b0e;
+        border: 1px solid #ff4d4d;
+        color: #ffcccc;
+        padding: 10px;
+        margin-bottom: 15px;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+      }
+      .news-badge {
+        background-color: #ff4d4d;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 4px;
+        margin-right: 10px;
+        font-size: 0.8rem;
+      }
+
+      .mentor-card {
+        padding: 12px;
+        margin-bottom: 8px;
+        border-radius: 8px;
+        font-size: 0.95rem;
+      }
+      .value-box {
+        background-color: #2c3e50;
+        border-left: 4px solid #f1c40f;
+      }
+      .momentum-box {
+        background-color: #c0392b;
+        border-left: 4px solid #e74c3c;
+      }
+      .contrarian-box {
+        background-color: #5d6d7e;
+        border-left: 4px solid #2e86c1;
+      }
+
+      .price-up {
+        animation: blink-red 0.5s;
+      }
+      .price-down {
+        animation: blink-blue 0.5s;
+      }
+      @keyframes blink-red {
+        0% {
+          background-color: rgba(255, 0, 0, 0.3);
+        }
+        100% {
+          background-color: transparent;
+        }
+      }
+      @keyframes blink-blue {
+        0% {
+          background-color: rgba(0, 0, 255, 0.3);
+        }
+        100% {
+          background-color: transparent;
+        }
+      }
+    </style>
+  </head>
+  <body class="container py-4">
+    <div
+      id="stock-menu"
+      style="
+        margin: 10px;
+        padding: 20px;
+        background: #252525;
+        border-radius: 12px;
+        color: white;
+        border: 1px solid #444;
+      "
+    >
+      <h3 class="mb-3">📈 종목 선택</h3>
+
+      <div class="mb-3">
+        <strong class="text-muted d-block mb-2">📟 전자</strong>
+        <button
+          class="btn btn-outline-danger btn-sm"
+          onclick="changeTicker('삼송전자')"
+        >
+          삼송전자
+        </button>
+        <button
+          class="btn btn-outline-danger btn-sm"
+          onclick="changeTicker('선우테크')"
+        >
+          선우테크
+        </button>
+        <button
+          class="btn btn-outline-danger btn-sm"
+          onclick="changeTicker('네오볼트전자')"
+        >
+          네오볼트전자
+        </button>
+      </div>
+
+      <div class="mb-3">
+        <strong class="text-muted d-block mb-2">💻 IT</strong>
+        <button
+          class="btn btn-outline-primary btn-sm"
+          onclick="changeTicker('마이크로하드')"
+        >
+          마이크로하드
+        </button>
+        <button
+          class="btn btn-outline-primary btn-sm"
+          onclick="changeTicker('소현소프트')"
+        >
+          소현소프트
+        </button>
+        <button
+          class="btn btn-outline-primary btn-sm"
+          onclick="changeTicker('클라우드핀 IT')"
+        >
+          클라우드핀 IT
+        </button>
+      </div>
+
+      <div class="mb-3">
+        <strong class="text-muted d-block mb-2">🧪 바이오</strong>
+        <button
+          class="btn btn-outline-success btn-sm"
+          onclick="changeTicker('재웅바이오')"
+        >
+          재웅바이오
+        </button>
+        <button
+          class="btn btn-outline-success btn-sm"
+          onclick="changeTicker('상은메디랩')"
+        >
+          상은메디랩
+        </button>
+        <button
+          class="btn btn-outline-success btn-sm"
+          onclick="changeTicker('루미젠바이오')"
+        >
+          루미젠바이오
+        </button>
+      </div>
+
+      <div>
+        <strong class="text-muted d-block mb-2">💰 금융</strong>
+        <button
+          class="btn btn-outline-warning btn-sm"
+          onclick="changeTicker('진호파이낸스')"
+        >
+          진호파이낸스
+        </button>
+        <button
+          class="btn btn-outline-warning btn-sm"
+          onclick="changeTicker('오리온자산운용')"
+        >
+          오리온자산운용
+        </button>
+        <button
+          class="btn btn-outline-warning btn-sm"
+          onclick="changeTicker('예진캐피탈')"
+        >
+          예진캐피탈
+        </button>
+      </div>
+    </div>
+
+    <div class="row mb-3 text-center">
+      <div class="col-12">
+        <h4 class="text-muted">Agent Market Simulator</h4>
+        <h2 id="stock-name">Loading...</h2>
+        <h1 id="current-price" class="display-3 fw-bold">0 KRW</h1>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-lg-8">
+        <div class="card p-3">
+          <canvas id="priceChart" height="150"></canvas>
+        </div>
+
+        <div class="news-ticker-box">
+          <span class="news-badge">LIVE NEWS</span>
+          <span id="news-text">시장의 소식을 기다리는 중입니다...</span>
+        </div>
+
+        <div class="card p-3">
+          <h5>💬 AI 멘토 리얼타임 피드백</h5>
+          <div id="mentor-area" style="min-height: 100px">
+            <small class="text-muted">멘토들이 시장을 분석 중입니다...</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-4">
+        <div class="card p-3">
+          <h5 class="text-center mb-3">Order Book</h5>
+          <table class="table table-dark table-sm text-center align-middle">
+            <thead>
+              <tr class="text-muted">
+                <th>가격</th>
+                <th>수량</th>
+              </tr>
+            </thead>
+            <tbody id="sell-book" class="text-blue fs-5"></tbody>
+            <tbody id="buy-book" class="text-red fs-5"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // 1. 차트 설정
+      const ctx = document.getElementById("priceChart").getContext("2d");
+      const chart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: "주가 흐름",
+              data: [],
+              borderColor: "#4caf50",
+              backgroundColor: "rgba(76, 175, 80, 0.1)",
+              borderWidth: 2,
+              fill: true,
+              tension: 0.3,
+              pointRadius: 0,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: { beginAtZero: false, grid: { color: "#333" } },
+            x: { grid: { display: false } },
+          },
+          animation: false,
+        },
+      });
+
+      // 현재 보고 있는 종목 변수
+      let currentTicker = "삼송전자";
+
+      // 종목 변경 함수
+      function changeTicker(tickerName) {
+        currentTicker = tickerName;
+
+        // 차트 데이터 초기화 (종목 바뀔 때 그래프가 튀는 현상 방지)
+        chart.data.labels = [];
+        chart.data.datasets[0].data = [];
+        chart.update();
+
+        alert(tickerName + "으로 종목을 변경합니다!");
+        fetchMarketData();
+      }
+
+      // 데이터 가져오는 함수
+      async function fetchMarketData() {
+        try {
+          const response = await fetch(
+            `/api/market-data?ticker=${currentTicker}`,
+          );
+
+          const data = await response.json();
+
+          // 에러 처리
+          if (data.error) {
+            console.error(data.error);
+            return;
+          }
+
+          // 1. 기본 정보 업데이트
+          document.getElementById("stock-name").innerText = `${data.name}`;
+          const priceEl = document.getElementById("current-price");
+          const oldPrice =
+            parseInt(priceEl.innerText.replace(/[^0-9]/g, "")) || 0;
+          priceEl.innerText = `${data.price.toLocaleString()} KRW`;
+
+          // 2. 깜빡임 효과
+          if (data.price > oldPrice)
+            priceEl.className = "display-3 fw-bold text-red price-up";
+          else if (data.price < oldPrice)
+            priceEl.className = "display-3 fw-bold text-blue price-down";
+
+          // 3. 뉴스 업데이트
+          document.getElementById("news-text").innerText = data.news;
+
+          // 4. 차트 데이터 밀어넣기
+          if (data.history.length > 0) {
+            chart.data.labels = data.history.map((h) => h.time);
+            chart.data.datasets[0].data = data.history.map((h) => h.price);
+            chart.update();
+          }
+
+          // 5. 호가창 업데이트
+          const sellRows = data.sell_orders.length
+            ? data.sell_orders
+                .map(
+                  (o) => `<tr><td>${o.price}</td><td>${o.quantity}</td></tr>`,
+                )
+                .reverse()
+                .join("")
+            : '<tr><td colspan="2" class="text-muted">- 매도 물량 없음 -</td></tr>';
+          const buyRows = data.buy_orders.length
+            ? data.buy_orders
+                .map(
+                  (o) => `<tr><td>${o.price}</td><td>${o.quantity}</td></tr>`,
+                )
+                .join("")
+            : '<tr><td colspan="2" class="text-muted">- 매수 물량 없음 -</td></tr>';
+
+          document.getElementById("sell-book").innerHTML = sellRows;
+          document.getElementById("buy-book").innerHTML = buyRows;
+
+          // 6. 멘토 업데이트
+          if (data.mentors.length > 0) {
+            const mentorHtml = data.mentors
+              .map(
+                (m) => `
+                        <div class="mentor-card ${m.style}">
+                            <strong>${m.name}:</strong> ${m.msg}
+                        </div>
+                    `,
+              )
+              .join("");
+            document.getElementById("mentor-area").innerHTML = mentorHtml;
+          }
+        } catch (error) {
+          console.error("Connection Error:", error);
+        }
+      }
+
+      setInterval(fetchMarketData, 1000);
+    </script>
+  </body>
+</html>
