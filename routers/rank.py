@@ -1,20 +1,23 @@
 from fastapi import APIRouter, Depends
-import aiosqlite
-from database import get_db_connection
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from database import get_db # 👈 새로운 연결 통로 가져오기
 import os
 
 router = APIRouter(prefix="/api/rank", tags=["Ranking"])
 
 # routers/rank.py (스냅샷 읽기 모드)
 @router.get("/top")
-async def get_top_ranking(db: aiosqlite.Connection = Depends(get_db_connection)):
-    cursor = await db.execute("""
+def get_top_ranking(db: Session = Depends(get_db)): # 👈 async 제거, aiosqlite 대신 Session 사용
+    # text() 함수로 SQL 쿼리를 감싸서 실행합니다.
+    result = db.execute(text("""
         SELECT rank, user_id, username, total_asset, profit_rate 
         FROM ranking_snapshot 
         ORDER BY rank ASC
-    """)
-    rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    """))
+    
+    # 결과를 딕셔너리 리스트로 변환하여 반환
+    return [dict(row._mapping) for row in result]
     
     # 1. 현재 주가 정보 가져오기 (딕셔너리로 변환: {'삼성전자': 78000, ...})
     cursor = await db.execute("SELECT company_name, current_price FROM stocks")
