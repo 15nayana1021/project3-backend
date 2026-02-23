@@ -69,9 +69,20 @@ async def simulate_market_background():
 
 def seed_database():
     with SessionLocal() as db:
+        # 1. 🔧 [DB 자동 수선 로직] 가장 먼저 실행되어야 합니다!
+        print("🔧 [시스템] DB 테이블 구조를 점검하고 수리합니다...")
+        try:
+            # orders 테이블과 news 테이블에 ticker 컬럼이 없으면 강제로 추가합니다.
+            db.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ticker VARCHAR(20)"))
+            db.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS ticker VARCHAR(20)"))
+            db.commit()
+            print("✅ [시스템] DB 수리 완료! (ticker 컬럼 확보)")
+        except Exception as e:
+            db.rollback()
+            print(f"⚠️ [시스템] DB 수리 중 참고사항(이미 수정되었을 수 있음): {e}")
+
+        # 2. 🌱 주식 가격 및 티커 동기화 (기존 로직)
         print("🌱 [시스템] DB 데이터를 보존하며 INITIAL_PRICES를 동기화합니다...")
-        
-        # 1. 주식 가격 및 티커 동기화 (기존 로직)
         for name, price in INITIAL_PRICES.items():
             correct_ticker = TICKER_MAP.get(name, name)
             company = db.query(DBCompany).filter(DBCompany.name == name).first()
@@ -85,11 +96,9 @@ def seed_database():
                     current_price=float(price), change_rate=0.0
                 )
                 db.add(new_comp)
-        
         db.commit()
 
-        # 🚀 2. [추가] 유저 '1' 자동 생성 로직
-        # 유저 '1'이 있는지 확인하고, 없으면 초기 자금 100만 원과 함께 생성합니다.
+        # 3. 🚀 유저 '1' 자동 생성 로직 (기존 로직)
         user_check = db.execute(text("SELECT id FROM users WHERE username = '1'")).fetchone()
         if not user_check:
             print("👤 [시스템] 유저 '1'이 없습니다. 자동으로 가입 처리를 진행합니다...")
@@ -102,7 +111,7 @@ def seed_database():
         else:
             print("✅ [시스템] 유저 '1'이 이미 활성화되어 있습니다.")
 
-        # 3. AI 에이전트 생성 (기존 로직)
+        # 4. 🤖 AI 에이전트 생성 (기존 로직)
         if db.query(DBAgent).count() == 0:
             print("🤖 [시스템] AI 에이전트 30명을 시장에 투입합니다...")
             agents = [
@@ -113,7 +122,6 @@ def seed_database():
             db.commit()
             
         print("✅ [시스템] 모든 데이터 동기화 및 초기화 완료!")
-
 # [FastAPI 앱 설정]
 @asynccontextmanager
 async def lifespan(app: FastAPI):
