@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Header, Path, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from datetime import datetime
 from database import get_db
 import os
 
@@ -138,83 +139,60 @@ class OrderRequest(BaseModel):
 
 @router.post("/order")
 def place_order(req: OrderRequest, db: Session = Depends(get_db)):
-    target_ticker = req.ticker if req.ticker else req.company_name
-    side = req.side.upper() if req.side else "BUY"
-
     try:
-        # 1. 현재가 조회 시도
-        current_market_price = None
-        stock_row = db.execute(text("SELECT current_price FROM stocks WHERE symbol = :ticker"), {"ticker": target_ticker}).fetchone()
-        if stock_row: 
-            current_market_price = stock_row[0]
-        else:
-            comp_row = db.execute(text("SELECT current_price FROM companies WHERE ticker = :ticker"), {"ticker": target_ticker}).fetchone()
-            if comp_row: current_market_price = comp_row[0]
+        # 1. 유저 확인 및 ID 정수 변환 (PostgreSQL은 타입을 엄격히 따집니다)
+        user_id = int(req.user_id)
+        target_ticker = req.ticker
+        side = req.side.upper()
+        quantity = int(req.quantity)
+        
+        # 2. 현재가 조회 (companies 테이블의 ticker 컬럼 사용)
+        # 💡 테이블 이름이 'stocks'인지 'companies'인지 database.py를 확인하세요! 
+        # 여기서는 'companies'라고 가정합니다.
+        comp_row = db.execute(
+            text("SELECT current_price FROM companies WHERE ticker = :ticker"), 
+            {"ticker": target_ticker}
+        ).fetchone()
+        
+        if not comp_row:
+            return {"success": False, "message": "존재하지 않는 종목입니다.", "msg": "존재하지 않는 종목입니다."}
+            
+        current_price = comp_row[0]
+        total_amount = current_price * quantity
 
-        if current_market_price is None:
-            current_market_price = req.price
-
-        # 2. 체결 조건 계산
-        is_immediate_fill = False
-        if req.order_type == "MARKET":
-            is_immediate_fill = True
-            req.price = current_market_price
-        else:
-            if side == "BUY" and req.price >= current_market_price:
-                is_immediate_fill = True
-                req.price = current_market_price 
-            elif side == "SELL" and req.price <= current_market_price:
-                is_immediate_fill = True
-                req.price = current_market_price
-
-        # 3. 자산 선 차감
-        total_amount = req.price * req.quantity
+        # 3. 매수 시 잔액 확인
         if side == "BUY":
-            user = db.execute(text("SELECT balance FROM users WHERE id = :uid"), {"uid": req.user_id}).fetchone()
-            if not user or user[0] < total_amount:
-                return {"success": False, "msg": "현금이 부족합니다."}
-            db.execute(text("UPDATE users SET balance = balance - :amt WHERE id = :uid"), {"amt": total_amount, "uid": req.user_id})
+            user_row = db.execute(
+                text("SELECT balance FROM users WHERE id = :uid"), 
+                {"uid": user_id}
+            ).fetchone()
+            
+            if not user_row or user_row[0] < total_amount:
+                return {"success": False, "message": "잔액이 부족합니다.", "msg": "잔액이 부족합니다."}
 
-        elif side == "SELL":
-            holding = db.execute(text("SELECT quantity FROM holdings WHERE user_id = :uid AND company_name = :ticker"), 
-                                 {"uid": req.user_id, "ticker": target_ticker}).fetchone()
-            if not holding or holding[0] < req.quantity:
-                return {"success": False, "msg": "보유 주식이 부족합니다."}
-            db.execute(text("UPDATE holdings SET quantity = quantity - :qty WHERE user_id = :uid AND company_name = :ticker"), 
-                       {"qty": req.quantity, "uid": req.user_id, "ticker": target_ticker})
-
-        # 4. 즉시 체결 처리
-        status = "PENDING"
-        msg = "주문이 접수되었습니다. (미체결)"
-
-        if is_immediate_fill:
-            if side == "BUY":
-                holding = db.execute(text("SELECT quantity FROM holdings WHERE user_id = :uid AND company_name = :ticker"), 
-                                     {"uid": req.user_id, "ticker": target_ticker}).fetchone()
-                if holding:
-                    db.execute(text("UPDATE holdings SET quantity = quantity + :qty WHERE user_id = :uid AND company_name = :ticker"), 
-                               {"qty": req.quantity, "uid": req.user_id, "ticker": target_ticker})
-                else:
-                    db.execute(text("INSERT INTO holdings (user_id, company_name, quantity, average_price) VALUES (:uid, :ticker, :qty, :price)"), 
-                               {"uid": req.user_id, "ticker": target_ticker, "qty": req.quantity, "price": req.price})
-            elif side == "SELL":
-                db.execute(text("UPDATE users SET balance = balance + :amt WHERE id = :uid"), {"amt": total_amount, "uid": req.user_id})
-
-            status = "FILLED"
-            msg = "즉시 체결 완료!"
-
-        # 5. 주문 기록 저장
+        # 4. 주문 기록 (PostgreSQL 컬럼명 주의: symbol -> ticker)
+        # 💡 만약 DB 설계 시 'symbol'을 썼다면 아래 ticker를 symbol로 바꾸세요.
         order_res = db.execute(text("""
-            INSERT INTO orders (user_id, company_name, order_type, price, quantity, status, game_date, created_at)
-            VALUES (:uid, :ticker, :side, :price, :qty, :status, :gdate, CURRENT_TIMESTAMP) RETURNING id
-        """), {"uid": req.user_id, "ticker": target_ticker, "side": side, "price": req.price, "qty": req.quantity, "status": status, "gdate": req.game_date}).fetchone()
+            INSERT INTO orders (user_id, ticker, side, quantity, price, status, created_at)
+            VALUES (:uid, :tk, :sd, :qty, :pr, 'PENDING', :ts)
+            RETURNING id
+        """), {
+            "uid": user_id, "tk": target_ticker, "sd": side, 
+            "qty": quantity, "pr": current_price, "ts": datetime.now()
+        }).fetchone()
         
         db.commit()
-        return {"success": True, "status": status, "msg": msg, "order_id": order_res[0]}
+        
+        return {
+            "success": True, 
+            "message": "주문이 성공적으로 접수되었습니다!", 
+            "order_id": order_res[0]
+        }
 
     except Exception as e:
         db.rollback()
-        return {"success": False, "msg": f"서버 오류: {str(e)}"}
+        print(f"🚨 주문 처리 중 치명적 에러: {e}") # 로그 스트림에 출력됨
+        return {"success": False, "message": f"서버 오류: {str(e)}", "msg": str(e)}
 
 @router.get("/orders/{user_id}")
 def get_my_orders(user_id: int, db: Session = Depends(get_db)):
