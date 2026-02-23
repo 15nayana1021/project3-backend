@@ -68,21 +68,29 @@ async def simulate_market_background():
     pass
 
 def seed_database():
-    with SessionLocal() as db:
-        # 1. 🔧 [DB 자동 수선 로직] 가장 먼저 실행되어야 합니다!
+    from database import engine, SessionLocal, DBCompany, DBAgent
+    from sqlalchemy import text
+    
+    # 1. 🔧 [강제 수리] 테이블 구조를 먼저 점검하고 고칩니다.
+    with engine.begin() as conn:
         print("🔧 [시스템] DB 테이블 구조를 점검하고 수리합니다...")
         try:
-            # orders 테이블과 news 테이블에 ticker 컬럼이 없으면 강제로 추가합니다.
-            db.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ticker VARCHAR(20)"))
-            db.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS ticker VARCHAR(20)"))
-            db.commit()
-            print("✅ [시스템] DB 수리 완료! (ticker 컬럼 확보)")
+            conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ticker VARCHAR(50);"))
+            conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS ticker VARCHAR(50);"))
+            conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS summary TEXT;"))
+            conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS sentiment VARCHAR(20);"))
+            conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS impact_score INTEGER;"))
+            conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS source VARCHAR(100);"))
+            conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS published_at TIMESTAMP;"))
+            print("✅ [시스템] DB 수리 완료! (news 테이블 풀옵션 장착 성공)")
         except Exception as e:
-            db.rollback()
             print(f"⚠️ [시스템] DB 수리 중 참고사항(이미 수정되었을 수 있음): {e}")
 
-        # 2. 🌱 주식 가격 및 티커 동기화 (기존 로직)
+    # 2. 🌱 [데이터 동기화] 방금 수리한 DB(db)에 데이터를 채워 넣습니다.
+    with SessionLocal() as db:
         print("🌱 [시스템] DB 데이터를 보존하며 INITIAL_PRICES를 동기화합니다...")
+        
+        # 주식 가격 및 티커 동기화
         for name, price in INITIAL_PRICES.items():
             correct_ticker = TICKER_MAP.get(name, name)
             company = db.query(DBCompany).filter(DBCompany.name == name).first()
@@ -98,7 +106,7 @@ def seed_database():
                 db.add(new_comp)
         db.commit()
 
-        # 3. 🚀 유저 '1' 자동 생성 로직 (기존 로직)
+        # 유저 '1' 자동 생성 로직
         user_check = db.execute(text("SELECT id FROM users WHERE username = '1'")).fetchone()
         if not user_check:
             print("👤 [시스템] 유저 '1'이 없습니다. 자동으로 가입 처리를 진행합니다...")
@@ -111,7 +119,7 @@ def seed_database():
         else:
             print("✅ [시스템] 유저 '1'이 이미 활성화되어 있습니다.")
 
-        # 4. 🤖 AI 에이전트 생성 (기존 로직)
+        # AI 에이전트 생성
         if db.query(DBAgent).count() == 0:
             print("🤖 [시스템] AI 에이전트 30명을 시장에 투입합니다...")
             agents = [
