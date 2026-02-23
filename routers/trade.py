@@ -148,7 +148,7 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
         if stock_row: 
             current_market_price = stock_row[0]
         else:
-            comp_row = db.execute(text("SELECT current_price FROM companies WHERE ticker = :ticker OR symbol = :ticker"), {"ticker": target_ticker}).fetchone()
+            comp_row = db.execute(text("SELECT current_price FROM companies WHERE ticker = :ticker"), {"ticker": target_ticker}).fetchone()
             if comp_row: current_market_price = comp_row[0]
 
         if current_market_price is None:
