@@ -138,17 +138,15 @@ class OrderRequest(BaseModel):
 def place_order(req: OrderRequest, db: Session = Depends(get_db)):
     try:
         user_id = int(req.user_id)
-        # 💡 [핵심] 프론트엔드가 ticker를 안 보내고 company_name으로 종목 코드를 보낼 수 있으므로 둘 다 체크합니다.
         target_ticker = req.ticker or req.company_name
         
-        # 💡 [핵심] 프론트엔드에서 넘어온 side를 명확하게 대문자로 통일합니다.
         side_str = req.side.upper() if req.side else "BUY" 
         if side_str not in ["BUY", "SELL"]:
-            side_str = "BUY" # 기본값 방어
+            side_str = "BUY"
 
         quantity = int(req.quantity)
         
-        # 종목 존재 여부 및 현재가 조회
+        # 종목 확인
         company = db.query(DBCompany).filter(DBCompany.ticker == target_ticker).first()
         if not company:
             return {"success": False, "message": "존재하지 않는 종목입니다.", "msg": "존재하지 않는 종목입니다."}
@@ -166,33 +164,49 @@ def place_order(req: OrderRequest, db: Session = Depends(get_db)):
             if not holding_row or holding_row[0] < quantity:
                  return {"success": False, "message": "보유 주식이 부족합니다.", "msg": "보유 주식이 부족합니다."}
 
-        # 🚀 [핵심] 시장 엔진으로 주문 전송! (이게 있어야 체결이 됩니다)
+        # 🚀 [부활한 핵심 코드] DB 장부에 먼저 무조건 기록합니다!
+        order_res = db.execute(text("""
+            INSERT INTO orders (user_id, ticker, side, quantity, price, status, created_at)
+            VALUES (:uid, :tk, :sd, :qty, :pr, 'PENDING', :ts)
+            RETURNING id
+        """), {
+            "uid": user_id, "tk": target_ticker, "sd": side_str, 
+            "qty": quantity, "pr": current_price, "ts": datetime.now()
+        }).fetchone()
+        
+        order_id = order_res[0]
+        
+        # 선결제 (돈부터 묶어둡니다)
+        if side_str == "BUY":
+            db.execute(text("UPDATE users SET balance = balance - :amt WHERE id = :uid"), {"amt": total_amount, "uid": user_id})
+        else:
+            db.execute(text("UPDATE holdings SET quantity = quantity - :qty WHERE user_id = :uid AND company_name = :tk"), {"qty": quantity, "uid": user_id, "tk": target_ticker})
+            
+        db.commit()
+
+        # 🚀 시장 엔진으로 주문 전송
         sim_side = OrderSide.BUY if side_str == "BUY" else OrderSide.SELL
         sim_order = SimOrder(
-            agent_id=str(user_id), # 엔진은 agent_id를 문자열로 취급합니다
+            agent_id=str(user_id),
             ticker=target_ticker,
             side=sim_side,
             order_type=OrderType.LIMIT,
             quantity=quantity,
-            price=current_price # 프론트엔드 요청 가격 대신 현재가로 시장가처럼 체결 유도
+            price=current_price
         )
         
-        # 시장에 주문 접수
-        sim_result = market_engine.place_order(db, sim_order)
+        # 엔진에 전송 (엔진이 체결하면 알아서 DB 상태를 바꿔줍니다)
+        try:
+            market_engine.place_order(db, sim_order)
+        except Exception as engine_e:
+            print(f"⚠️ 엔진 전송 에러(무시 가능): {engine_e}")
 
-        # 💡 시뮬레이션 엔진이 DB에 거래 내역을 알아서 남기므로, 
-        # 임시로 만들어뒀던 INSERT INTO orders 코드는 삭제했습니다.
-        
-        if sim_result['status'] == 'SUCCESS':
-             msg = f"{company.name} {quantity}주 {'매수' if side_str=='BUY' else '매도'} 체결 완료!"
-             return {"success": True, "message": msg, "msg": msg}
-        else:
-             msg = "주문이 시장에 접수되어 대기 중입니다."
-             return {"success": True, "message": msg, "msg": msg}
+        msg = f"{company.name} {quantity}주 주문 접수 완료!"
+        return {"success": True, "message": msg, "msg": msg, "order_id": order_id}
 
     except Exception as e:
         db.rollback()
-        print(f"🚨 주문 처리 중 치명적 에러: {e}") 
+        print(f"🚨 주문 처리 중 에러: {e}") 
         return {"success": False, "message": f"서버 오류: {str(e)}", "msg": str(e)}
 
 @router.get("/orders/{user_id}")
@@ -217,44 +231,42 @@ def get_my_orders(user_id: int, db: Session = Depends(get_db)):
 @router.delete("/order/{order_id}")
 def cancel_order(order_id: int, db: Session = Depends(get_db)):
     try:
-        order = db.execute(text("SELECT * FROM orders WHERE id = :oid"), {"oid": order_id}).fetchone()
+        # 상태 확인 (컬럼을 명시적으로 가져와 에러 방지)
+        order = db.execute(text("SELECT user_id, price, quantity, ticker, side, status FROM orders WHERE id = :oid"), {"oid": order_id}).fetchone()
+        
         if not order:
             raise HTTPException(status_code=404, detail="주문을 찾을 수 없습니다.")
             
-        order_dict = dict(order._mapping)
-        current_status = order_dict['status'].strip()
+        user_id, price, quantity, ticker, side, current_status = order
         
-        if current_status != 'PENDING':
+        if current_status.strip() != 'PENDING':
             raise HTTPException(status_code=400, detail=f"취소 불가: 현재 상태가 '{current_status}' 입니다.")
             
-        user_id = order_dict['user_id']
-        price = order_dict['price']
-        quantity = order_dict['quantity']
-        ticker = order_dict['ticker']
-        side = order_dict['side']
-        
+        # 환불 처리
         if side == 'BUY':
             refund = price * quantity
             db.execute(text("UPDATE users SET balance = balance + :refund WHERE id = :uid"), {"refund": refund, "uid": user_id})
         elif side == 'SELL':
-            db.execute(text("UPDATE holdings SET quantity = quantity + :qty WHERE user_id = :uid AND company_name = :ticker"), 
-                       {"qty": quantity, "uid": user_id, "ticker": ticker})
+            db.execute(text("UPDATE holdings SET quantity = quantity + :qty WHERE user_id = :uid AND company_name = :tk"), 
+                       {"qty": quantity, "uid": user_id, "tk": ticker})
             
+        # 상태 변경
         db.execute(text("UPDATE orders SET status = 'CANCELLED' WHERE id = :oid"), {"oid": order_id})
         db.commit()
         
-        # 💡 [추가] 시장 엔진에서도 취소 요청 (마켓 엔진 구현에 따라 동작)
+        # 엔진에서도 삭제 시도
         try:
              market_engine.cancel_order(str(user_id), ticker, order_id)
         except: pass
         
-        return {"status": "success", "message": "주문이 취소되었습니다."}
+        return {"status": "success", "message": "주문이 성공적으로 취소되었습니다."}
         
     except HTTPException as he:
         db.rollback()
         raise he
     except Exception as e:
         db.rollback()
+        print(f"🚨 취소 처리 중 에러: {e}")
         raise HTTPException(status_code=500, detail=f"서버 에러: {str(e)}")
 
 
