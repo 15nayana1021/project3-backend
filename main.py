@@ -71,20 +71,30 @@ def seed_database():
     from database import engine, SessionLocal, DBCompany, DBAgent
     from sqlalchemy import text
     
-    # 1. 🔧 [강제 수리] 테이블 구조를 먼저 점검하고 고칩니다.
+    # 1. 🔧 [강제 수리] 테이블 구조를 먼저 점검하고 고칩니다. (궁극의 완전체 버전)
     with engine.begin() as conn:
         print("🔧 [시스템] DB 테이블 구조를 점검하고 수리합니다...")
         try:
+            # 🛒 orders 테이블 수리 (스크린샷 에러 방어)
             conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ticker VARCHAR(50);"))
+            conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS side VARCHAR(10);"))
+            conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INTEGER;"))
+            conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS price FLOAT;"))
+            conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS status VARCHAR(20);"))
+            conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP;"))
+
+            # 📰 news 테이블 수리 (로그 스트림 에러 방어)
             conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS ticker VARCHAR(50);"))
             conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS summary TEXT;"))
             conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS sentiment VARCHAR(20);"))
             conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS impact_score INTEGER;"))
             conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS source VARCHAR(100);"))
             conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS published_at TIMESTAMP;"))
-            print("✅ [시스템] DB 수리 완료! (news 테이블 풀옵션 장착 성공)")
+            conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS created_at TIMESTAMP;")) # 👈 이번 로그 에러의 주범!
+            
+            print("✅ [시스템] DB 수리 완료! (모든 누락된 컬럼 완벽 장착 성공)")
         except Exception as e:
-            print(f"⚠️ [시스템] DB 수리 중 참고사항(이미 수정되었을 수 있음): {e}")
+            print(f"⚠️ [시스템] DB 수리 중 참고사항: {e}")
 
     # 2. 🌱 [데이터 동기화] 방금 수리한 DB(db)에 데이터를 채워 넣습니다.
     with SessionLocal() as db:
