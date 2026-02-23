@@ -128,13 +128,22 @@ async def lifespan(app: FastAPI):
     # DB 초기화 및 데이터 적재
     init_db()
     with db_engine.connect() as conn:
-        try:
-            conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS ticker VARCHAR(20)"))
-            conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ticker VARCHAR(20)"))
-            conn.commit()
-            print("🛠️ [강제 수리] ticker 컬럼을 생성했습니다!")
-        except Exception as e:
-            print(f"🛠️ [강제 수리] 확인 필요: {e}")
+            try:
+                # 1. orders 테이블 수리
+                conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ticker VARCHAR(20)"))
+                
+                # 2. news 테이블 풀옵션 장착! (누락된 칸 모두 생성)
+                conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS ticker VARCHAR(20)"))
+                conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS summary TEXT"))
+                conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS sentiment VARCHAR(20)"))
+                conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS impact_score INTEGER"))
+                conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS source VARCHAR(100)"))
+                conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS published_at TIMESTAMP"))
+                
+                conn.commit()
+                print("🛠️ [강제 수리] news 테이블의 누락된 모든 컬럼을 완벽하게 생성했습니다!")
+            except Exception as e:
+                print(f"🛠️ [강제 수리] 이미 컬럼이 있거나 수리가 불필요합니다: {e}")
     seed_database() 
     
     # 이제 main_simulation 모듈을 정상적으로 인식합니다.
