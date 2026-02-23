@@ -1,5 +1,7 @@
-from fastapi import APIRouter, HTTPException
-from database import get_db_connection
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from database import get_db
 import os
 
 # 진짜 레벨업 조건표(정답지)를 가져옵니다.
@@ -10,38 +12,38 @@ except ImportError:
 
 router = APIRouter()
 
-# 🏆 [랭킹 시스템] 총 자산(현금 + 주식) 순위 TOP 10 조회
+# 🏆 [랭킹 시스템] 총 자산(현금 + 주식) 순위 TOP 100 조회
 @router.get("/ranking")
-async def get_ranking():
-    conn = await get_db_connection()
+def get_ranking(db: Session = Depends(get_db)): # 👈 async 제거, Session 주입
     try:
         # 1. 모든 유저 정보 가져오기
-        async with conn.execute("SELECT id, username, level, balance, exp FROM users") as cursor:
-            users = await cursor.fetchall()
-            
+        users = db.execute(text("SELECT id, username, level, balance, exp FROM users")).fetchall()
+        
         ranking_list = []
         
         # 2. 각 유저별로 '총 자산' 계산하기
         for user in users:
-            user_id = user["id"]
-            cash = user["balance"]
+            user_id = user[0]
+            username = user[1]
+            level = user[2] if user[2] else 1
+            cash = user[3]
+            exp = user[4]
             
             # 이 유저의 보유 주식 가져오기
-            async with conn.execute("""
+            holdings = db.execute(text("""
                 SELECT h.quantity, h.average_price, s.current_price 
                 FROM holdings h
                 JOIN stocks s ON h.company_name = s.company_name
-                WHERE h.user_id = ?
-            """, (user_id,)) as cursor:
-                holdings = await cursor.fetchall()
+                WHERE h.user_id = :user_id
+            """), {"user_id": user_id}).fetchall()
             
             total_stock_value = 0
             total_invested = 0
             
             for h in holdings:
-                current_price = h["current_price"]
-                qty = h["quantity"]
-                avg_price = h["average_price"]
+                qty = h[0]
+                avg_price = h[1]
+                current_price = h[2]
                 
                 total_stock_value += (current_price * qty)
                 total_invested += (avg_price * qty)
@@ -55,17 +57,17 @@ async def get_ranking():
                 profit_rate = ((total_stock_value - total_invested) / total_invested) * 100
             
             ranking_list.append({
-                "username": user["username"],
-                "level": user["level"] if user["level"] else 1,
+                "username": username,
+                "level": level,
                 "total_assets": int(total_assets),
                 "profit_rate": round(profit_rate, 2),
-                "exp": user["exp"]
+                "exp": exp
             })
             
         # 3. 총 자산 순서대로 내림차순 정렬 (부자가 1등!)
         ranking_list.sort(key=lambda x: x["total_assets"], reverse=True)
         
-        # 4. 랭킹 번호 매겨서 반환 (상위 10명만)
+        # 4. 랭킹 번호 매겨서 반환 (상위 100명만)
         result = []
         for i, item in enumerate(ranking_list[:100], 1):
             result.append({
@@ -78,40 +80,43 @@ async def get_ranking():
             })
             
         return result
-    finally:
-        await conn.close()
+    except Exception as e:
+        print(f"❌ 랭킹 조회 에러: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# 레벨 및 경험치 조회 (기존 코드 그대로 유지)
-@router.get("/my-profile/{user_id}")
-async def get_my_profile(user_id: str):
-    conn = await get_db_connection()
+
+# 레벨 및 경험치 조회
+@router.get("/my-profile/{username}")
+def get_my_profile(username: str, db: Session = Depends(get_db)): # 👈 async 제거, 매개변수 이름 명확히
     try:
         # 1. 내 정보 가져오기
-        async with conn.execute("SELECT * FROM users WHERE username = ?", (user_id,)) as cursor:
-            user = await cursor.fetchone()
+        user = db.execute(text("SELECT id, username, level, balance, exp FROM users WHERE username = :uname"), {"uname": username}).fetchone()
         
         if not user:
             return None
 
-        # 2. 완료한 퀘스트 개수 세기 (업적 점수용)
-        async with conn.execute(
-            "SELECT count(*) FROM user_quests WHERE user_id = (SELECT id FROM users WHERE username = ?) AND is_completed = 1", 
-            (user_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            quest_count = row[0] if row else 0
+        user_id = user[0]
+        current_lvl = user[2]
+        balance = user[3]
+        current_exp = user[4] if user[4] else 0
 
-        current_lvl = user['level']
+        # 2. 완료한 퀘스트 개수 세기
+        row = db.execute(text("""
+            SELECT count(*) FROM user_quests 
+            WHERE user_id = :uid AND is_completed = 1
+        """), {"uid": user_id}).fetchone()
+        
+        quest_count = row[0] if row else 0
         next_goal = LEVEL_TABLE.get(current_lvl, 999999)
-        current_exp = user['exp'] if user['exp'] else 0
 
         return {
-            "username": user['username'],
+            "username": user[1],
             "level": current_lvl,
-            "balance": user['balance'],
+            "balance": balance,
             "quest_cleared": quest_count,
             "current_exp": current_exp,
             "next_level_exp": next_goal
         }
-    finally:
-        await conn.close()
+    except Exception as e:
+        print(f"❌ 프로필 조회 에러: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
